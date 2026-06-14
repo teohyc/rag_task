@@ -242,7 +242,7 @@ def rewrite_query_node(state: AgentState) -> AgentState:
     new_query = response.content.strip()
     print(f"New Search Query: {new_query}")
     
-    return {"current_query": new_query, "loop_count": state["loop_count"] + 1}
+    return {"current_query": new_query, "loop_count": state["loop_count"] + 1} #increase loop count
 
 def external_research_node(state: AgentState) -> dict:
     print(f"--- [AGENT: EXTERNAL RESEARCH] Iteration: {state['loop_count']} ---")
@@ -275,11 +275,11 @@ def external_research_node(state: AgentState) -> dict:
     #if this is the first time entering the node, start the conversation
     if not existing_msg:
         response = llm_with_tools.invoke([system_msg, HumanMessage(content=state["original_question"])])
-        return {"research_messages": [response], "loop_count": state["loop_count"] + 1}
+        return {"research_messages": [response], "loop_count": state["loop_count"] + 1} #increase loop count
     else:
         #continue the conversation with tool results
         response = llm_with_tools.invoke([system_msg] + existing_msg)
-        return {"research_messages": existing_msg + [response], "loop_count": state["loop_count"] + 1}
+        return {"research_messages": existing_msg + [response], "loop_count": state["loop_count"] + 1} #increase loop count
 
 def finalize_research_node(state: AgentState) -> dict:
     """Extracts the final answer from the research loop."""
@@ -332,8 +332,8 @@ def decide_next_step(state: AgentState) -> str:
     if state["current_query"] == "sufficient":
         return "generate"
     
-    # After 3 failed local rewrites, give up on local and go to the web tool
-    if state["loop_count"] >= 3:
+    # After 5 failed local rewrites, give up on local and go to the web tool
+    if state["loop_count"] >= 4: #maximum 5 local queries
         print("--- [AGENT: LOCAL MAX LOOPS REACHED. ROUTING TO WEB RESEARCH] ---")
         return "research"
         
@@ -346,12 +346,12 @@ def route_research(state: AgentState) -> str:
     
     # If the LLM outputted a tool call, route to the tool execution node
     if getattr(last_msg, "tool_calls", None):
-        if state["loop_count"] >= 7:
+        if state["loop_count"] >= 8: #maximum 3 web search
             print("MAX ONLINE SEARCHES REACHED. FORCING FINAL ANSWER.")
             return "generate_fallback"
         return "execute_tool"
         
-    # If the LLM didn't call a tool, it generated a standard text answer! We are done.
+    #if the LLM didn't call a tool, it generated a standard text answer
     return "finalize_research"
 
 #BUILDING THE GRAPH
@@ -423,18 +423,19 @@ img.save("rag_agent_diagram.png")
 '''
 #test run
 if __name__ == "__main__":
-    test_question = input("Enter your question for the RAG Agent:\n")
+    while True:
+        test_question = input("Enter your question for the RAG Agent:\n")
     
-    initial_state = {
-        "original_question": test_question,
-        "current_query": test_question,
-        "retrieved_docs": [],
-        "generation": "",
-        "loop_count": 0
-    }
+        initial_state = {
+            "original_question": test_question,
+            "current_query": test_question,
+            "retrieved_docs": [],
+            "generation": "",
+            "loop_count": 0
+        }
     
-    print("\nStarting Agentic Run...\n" + "="*50)
-    final_state = agent_app.invoke(initial_state)
-    print("\n" + "="*50)
-    print("\nFINAL OUTPUT:\n")
-    print(final_state["generation"])
+        print("\nStarting Agentic Run...\n" + "="*50)
+        final_state = agent_app.invoke(initial_state)
+        print("\n" + "="*50)
+        print("\nFINAL OUTPUT:\n")
+        print(final_state["generation"])
