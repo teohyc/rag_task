@@ -1,8 +1,11 @@
 from langchain_ollama import OllamaEmbeddings, ChatOllama
 from langchain_chroma import Chroma
 from langchain_core.messages import HumanMessage
+from langchain_core.documents import Document
 from langchain_classic.retrievers.contextual_compression import ContextualCompressionRetriever
 from langchain_classic.retrievers.document_compressors import CrossEncoderReranker
+from langchain_community.retrievers import BM25Retriever
+from langchain_classic.retrievers import EnsembleRetriever
 from langchain_community.cross_encoders import HuggingFaceCrossEncoder
 import time
 
@@ -20,15 +23,38 @@ def test_rag_pipeline():
     print(f"Connecting to vector database using {EMBEDDING_MODEL}...")
     embeddings = OllamaEmbeddings(model=EMBEDDING_MODEL)
     
+    #connect to ChromaDB
     vectorstore = Chroma(
         persist_directory=PERSIST_DIR,
         collection_name=COLLECTION_NAME,
         embedding_function=embeddings
     )
+
+    #building BM25 retriever from the raw documents stored in ChromaDB
+    print("Building BM25 Lexical Retriever from ChromaDB chunks...")
+    db_data = vectorstore.get()
+    all_documents = []
     
-    #build cross-encoder retriever
+    # Reconstruct the Document objects
+    for i in range(len(db_data['ids'])):
+        doc = Document(
+            page_content=db_data['documents'][i], 
+            metadata=db_data['metadatas'][i]
+        )
+        all_documents.append(doc)
+        
+    bm25_retriever = BM25Retriever.from_documents(all_documents)
+    bm25_retriever.k = 15 #top 15 results from BM25
+    
     #vector search
-    base_retriever = vectorstore.as_retriever(search_kwargs={"k": 15})
+    vector_retriever = vectorstore.as_retriever(search_kwargs={"k": 15})
+
+    #building hybrid retriever that combines BM25 and vector search results
+    print("Fusing Vector and BM25 Retrievers...")
+    hybrid_retriever = EnsembleRetriever(
+        retrievers=[bm25_retriever, vector_retriever],
+        weights=[0.5, 0.5] #give equal weight to keywords and semantics
+    )
 
     #reranker model
     print("Loading Cross-Encoder Reranker...")
@@ -40,7 +66,7 @@ def test_rag_pipeline():
     #combined into optimized cross-encoder retriever
     optimized_retriever = ContextualCompressionRetriever(
         base_compressor=compressor, 
-        base_retriever=base_retriever
+        base_retriever=hybrid_retriever
     )
     
     print("\nRetrieving and Re-ranking context...")
@@ -56,7 +82,7 @@ def test_rag_pipeline():
     #define query
     query = "According to the documents, what is the main difference between LoRA and QLoRA?"
     print(f"\n[User Query]: {query}")
-    print("\nRetrieving context from ChromaDB...")
+    print("\nRetrieving context from Hybrid Retriever...")
     
     # fetch the chunks and extract metadata
     docs = optimized_retriever.invoke(query)

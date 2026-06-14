@@ -4,14 +4,18 @@ from langgraph.graph import StateGraph, END
 from langchain_ollama import OllamaEmbeddings, ChatOllama
 from langchain_chroma import Chroma
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.documents import Document
 from langchain_classic.retrievers.contextual_compression import ContextualCompressionRetriever
 from langchain_classic.retrievers.document_compressors import CrossEncoderReranker
+from langchain_community.retrievers import BM25Retriever
+from langchain_classic.retrievers import EnsembleRetriever
 from langchain_community.cross_encoders import HuggingFaceCrossEncoder
 from langchain_core.tools import tool
 from langgraph.prebuilt import ToolNode
 import requests
 import arxiv
 
+#for graph visualization
 from PIL import Image
 from io import BytesIO
 
@@ -24,20 +28,42 @@ LLM_MODEL = "granite4:latest"
 #initialize all needed components
 print("Initializing Agentic Hardware Pipeline...")
 
-#initialize embedding model
+#initialize embedding model and llm
 embeddings = OllamaEmbeddings(model=EMBEDDING_MODEL)
+llm = ChatOllama(model=LLM_MODEL, temperature=0.1) #low temp for more factual and less creative responses due to technical nature of the question
 
+print("Building Hybrid Retriever...")
 #initialize vector database connection
 vectorstore = Chroma(persist_directory=PERSIST_DIR, collection_name=COLLECTION_NAME, embedding_function=embeddings)
 
+#initialize BM25 retriever from ChromaDB
+db_data = vectorstore.get()
+all_documents = []
+    
+# Reconstruct the Document objects
+for i in range(len(db_data['ids'])):
+    doc = Document(
+        page_content=db_data['documents'][i], 
+        metadata=db_data['metadatas'][i]
+    )
+    all_documents.append(doc)
+        
+bm25_retriever = BM25Retriever.from_documents(all_documents)
+bm25_retriever.k = 15 #top 15 results from BM25
+
 #cross-encoder retriever setup
-base_retriever = vectorstore.as_retriever(search_kwargs={"k": 15})
+vector_retriever = vectorstore.as_retriever(search_kwargs={"k": 15})
+
+#build hybrid retriever
+hybrid_retriever = EnsembleRetriever(
+        retrievers=[bm25_retriever, vector_retriever],
+        weights=[0.5, 0.5] #give equal weight to keywords and semantics
+    )
+
+#cross-encoder reranker setup
 reranker_model = HuggingFaceCrossEncoder(model_name="cross-encoder/ms-marco-MiniLM-L-6-v2")
 compressor = CrossEncoderReranker(model=reranker_model, top_n=5)
-optimized_retriever = ContextualCompressionRetriever(base_compressor=compressor, base_retriever=base_retriever) #15 chunks down to 5 most relevant ones
-
-#initialize llm
-llm = ChatOllama(model=LLM_MODEL, temperature=0.1) #low temp for more factual and less creative responses due to technical nature of the question
+optimized_retriever = ContextualCompressionRetriever(base_compressor=compressor, base_retriever=hybrid_retriever) #15 chunks down to 5 most relevant ones
 
 #literature search tool (only used when RAG retrieval fails)
 @tool
@@ -98,6 +124,30 @@ class AgentState(TypedDict):
     research_messages: list
 
 #NODES OF THE GRAPH
+
+def analyze_query_node(state: AgentState) -> AgentState:
+    """Intercepts the raw user question and optimizes it for Hybrid Search."""
+    print("\n--- [AGENT: ANALYZING USER INTENT & OPTIMIZING QUERY] ---")
+    
+    prompt = SystemMessage(content=f"""You are an expert database search query generator.
+    Your task is to convert the user's conversational question into a highly optimized search query for a Vector and BM25 database.
+    
+    RULES:
+    1. Strip away all conversational filler (e.g., "What is", "Can you explain", "tell me").
+    2. Keep ONLY the core technical concepts, hardware names, and algorithmic terms.
+    3. Return ONLY the optimized search string. Do not include quotes, preambles, or explanations.
+    
+    User Question: {state['original_question']}
+    """)
+    
+    response = llm.invoke([prompt])
+    
+    #clean up the output in case of any formatting issues or extra symbols
+    optimized_query = response.content.strip().replace('"', '').replace('\n', ' ')
+    
+    print(f"Optimized Query: '{optimized_query}'")
+    
+    return {"current_query": optimized_query}
 
 def retrieve_node(state: AgentState) -> AgentState:
     """Fetches documents using the optimized Cross-Encoder pipeline."""
@@ -311,6 +361,7 @@ workflow = StateGraph(AgentState)
 tool_node = ToolNode([search_literature], messages_key="research_messages") #define location  of tool calls in the state
 
 #Nodes
+workflow.add_node("analyze_query", analyze_query_node)
 workflow.add_node("retrieve", retrieve_node)
 workflow.add_node("grade", grade_documents_node)
 workflow.add_node("rewrite", rewrite_query_node)     
@@ -320,7 +371,10 @@ workflow.add_node("execute_tool", tool_node)
 workflow.add_node("finalize", finalize_research_node)
 
 #entry point
-workflow.set_entry_point("retrieve")
+workflow.set_entry_point("analyze_query")
+
+#edge to analyse quer before retieval
+workflow.add_edge("analyze_query", "retrieve")
 
 #local RAG loop
 workflow.add_edge("retrieve", "grade")
