@@ -287,7 +287,7 @@ def finalize_research_node(state: AgentState) -> dict:
     for msg in state["research_messages"]:
 
         #check if the tool ever returned our fatal flag
-        if getattr(msg, "content", None) and ("FATAL_ERROR_429" in msg.content):
+        if getattr(msg, "content", None) :
             print(">>PYTHON OVERRIDE: API Failure detected in history. Purging hallucinated response.")
             safe_abort_msg = (
                 "I could not find this information in the local database. "

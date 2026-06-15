@@ -34,7 +34,7 @@ with st.sidebar:
     st.image("https://img.icons8.com/wired/64/000000/artificial-intelligence.png", width=60)
     st.title("System Health")
     st.subheader("Model Configuration")
-    st.info("⚡ LLM: **Granite-4B (Ollama)**\n\n Embeddings: **Nomic-Embed**")
+    st.info("⚡🧠 LLM: **Granite-4B (Ollama)**\n\n Embeddings: **Nomic-Embed**")
     
     st.subheader("RAG Retrievers Active")
     st.success(" **BM25 Lexical Index** (k=15)\n\n **Chroma Vector Store** (k=15)\n\n **Cross-Encoder Reranker** (top_n=5)")
