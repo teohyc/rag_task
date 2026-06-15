@@ -44,7 +44,7 @@ with st.sidebar:
 
 #main title header
 st.title("Hardware & Edge AI Intelligence Agent")
-st.caption("Enterprise-grade Agentic RAG combining Hybrid Keyword-Semantic Retrieval, Reranking, and ArXiv Academic Fallbacks.")
+st.caption("Agentic RAG combining Hybrid Keyword-Semantic Retrieval, Reranking, and ArXiv Academic Fallbacks.")
 
 #initialize message history session state
 if "messages" not in st.session_state:

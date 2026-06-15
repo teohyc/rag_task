@@ -92,8 +92,8 @@ def search_literature(query: str) -> str:
             abstract = result.summary.replace('\n', ' ')
             
             #saving context window
-            if abstract and len(abstract) > 1000:
-                abstract = abstract[:1000] + "..."
+            if abstract and len(abstract) > 1300:
+                abstract = abstract[:1300] + "..."
                 
             summaries.append(
                 f"[Source: {result.title} ({result.published.year})]\n"
