@@ -178,7 +178,7 @@ def grade_documents_node(state: AgentState) -> AgentState:
     
     prompt = SystemMessage(content=f"""You are a strict grading evaluator. 
     Does the following context explicitly contain the facts needed to answer the user's question?
-    You must grade by prioritizing the question's intent.
+    You must grade by identifying if the context really answers the question and not juts the related topic.
     Every response MUST end with either <YES> if the context is sufficient to answer the question, or <NO> if it is not.
     
     Question: {state['original_question']}
@@ -259,17 +259,14 @@ def external_research_node(state: AgentState) -> dict:
     
     system_msg = SystemMessage(content=f"""
     You are an AI hardware researcher. 
-    CRITICAL INSTRUCTION: The secure local database just FAILED to contain the answer for: "{state['original_question']}"
+    The local database FAILED to contain the answer for: "{state['original_question']}"
     
-    Your tool is 'search_literature'. Use it to search the web for live academic papers.
+    Your task is strictly to gather facts to answer the question. 
+    Use the 'search_literature' tool to search ArXiv for academic papers.
+    Read the tool's output. If you need more information, use the tool again.
     
-    When you have gathered enough information, synthesize a final technical answer.
-    YOUR FINAL ANSWER MUST FOLLOW THIS STRUCTURE:
-    1. You MUST start by explicitly stating: "I could not find this information in the local documentation. However, I have retrieved the following live academic data:"
-    2. Answer the question using the tool data.
-    3. Cite your web sources using the URLs provided.
-    
-    If you cannot find the answer after searching, you MUSTadmit defeat gracefully and explicitly.
+    When you have finally found the information that answers the user's question, simply write a summary of the facts and the URLs you found with full citations. Do not worry about formatting.
+    If you cannot find the answer after searching, output exactly: "NO_INFORMATION_FOUND"
     """)
     
     #if this is the first time entering the node, start the conversation
@@ -282,10 +279,46 @@ def external_research_node(state: AgentState) -> dict:
         return {"research_messages": existing_msg + [response], "loop_count": state["loop_count"] + 1} #increase loop count
 
 def finalize_research_node(state: AgentState) -> dict:
-    """Extracts the final answer from the research loop."""
-    print("--- [AGENT: RESEARCH COMPLETE. FINALIZING] ---")
-    last_msg = state["research_messages"][-1]
-    return {"generation": last_msg.content}
+    """Uses an LLM to cleanly synthesize the Web Researcher's raw notes."""
+    print("--- [AGENT: RESEARCH COMPLETE. SYNTHESIZING FINAL ANSWER] ---")
+    
+    
+    #extract the exact, raw, unedited string output directly from the ArXiv tool.
+    raw_tool_data = "No valid data retrieved from tool."
+    for msg in reversed(state["research_messages"]):
+        if msg.type == "tool":
+            raw_tool_data = msg.content
+            break
+            
+    #check for the fatal 429 error flag in the raw data just in case
+    if "FATAL_ERROR_429" in raw_tool_data:
+        print(">> PYTHON OVERRIDE: API Failure detected. Purging response.")
+        return {"generation": "I autonomously routed to the live ArXiv API, but the server is currently rejecting connections. I must admit defeat rather than extrapolate unverified data."}
+
+    #force the LLM to read the RAW data, not its own memory.
+    prompt = SystemMessage(content=f"""You are an expert technical writer.
+    The user asked: "{state['original_question']}"
+    
+    Our local database failed, but our autonomous Web Tool executed and retrieved the following RAW DATA directly from ArXiv:
+    
+    --- START RAW DATA ---
+    {raw_tool_data}
+    --- END RAW DATA ---
+    
+    YOUR TASK:
+    Write a clear, structured, and highly technical final answer based STRICTLY on the RAW DATA above.
+    
+    CRITICAL RULES:
+    1. You MUST start your response exactly with this phrase: "I could not find this information in the local documentation. However, I have retrieved the following live academic data:"
+    2. Answer the question comprehensively using bullet points and only include information directly from the RAW DATA and relevant to the question.
+    3. You MUST physically copy and paste the exact URLs provided in the RAW DATA for your citations. DO NOT invent or alter the URLs.
+    4. If the RAW DATA says "No relevant papers found", admit defeat gracefully and explicitly.
+    """)
+    
+    #invoke the LLM purely for writing the final text based on the raw tool string
+    response = llm.invoke([prompt])
+    
+    return {"generation": response.content}
 
 def generate_node(state: AgentState) -> AgentState:
     """Generates the final response with citations."""
