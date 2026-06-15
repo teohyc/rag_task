@@ -35,7 +35,7 @@ def test_rag_pipeline():
     db_data = vectorstore.get()
     all_documents = []
     
-    # Reconstruct the Document objects
+    #reconstruct the document objects
     for i in range(len(db_data['ids'])):
         doc = Document(
             page_content=db_data['documents'][i], 
@@ -80,33 +80,59 @@ def test_rag_pipeline():
     )
     
     #define query
-    query = "According to the documents, what is the main difference between LoRA and QLoRA?"
+    query = input("Query: ")
     print(f"\n[User Query]: {query}")
-    print("\nRetrieving context from Hybrid Retriever...")
     
-    # fetch the chunks and extract metadata
+    #FULL QUERY DIAGNOSTIC
+    
+    #bm25 diagnostic
+    print("\n--- [DIAGNOSTIC] BM25 LEXICAL SEARCH (TOP 15) ---")
+    bm25_raw = bm25_retriever.invoke(query)
+    for i, doc in enumerate(bm25_raw):
+        src = doc.metadata.get('source', 'Unknown').split("\\")[-1].split("/")[-1]
+        pg = doc.metadata.get('page', 'N/A')
+        print(f"BM25 Rank {i+1}: {src} (Page {pg})")
+        
+    #vector search diagnostic
+    print("\n--- [DIAGNOSTIC] VECTOR SEMANTIC SEARCH (TOP 15) ---")
+    vector_raw = vectorstore.similarity_search_with_score(query, k=15)
+    for i, (doc, score) in enumerate(vector_raw):
+        src = doc.metadata.get('source', 'Unknown').split("\\")[-1].split("/")[-1]
+        pg = doc.metadata.get('page', 'N/A')
+        # Note: Depending on Chroma's metric (L2 vs Cosine), lower distance is usually better
+        print(f"Vector Rank {i+1}: {src} (Page {pg}) | Distance: {score:.4f}")
+
+    #hybrid retriever diagnostic
+    print("\nRetrieving context from Hybrid Retriever + Cross-Encoder...")
+    
+    #fetch the chunks and extract metadata
     docs = optimized_retriever.invoke(query)
     
     if not docs:
         print("Error: No documents found! The database might be empty.")
         return
     
-    #print retrieved docs
-    print("--- [DIAGNOSTIC] CHOSEN SOURCES ---")
+    #cross encoder selection diagnostic
+    print("\n--- [DIAGNOSTIC] FINAL CHOSEN SOURCES (TOP 5) ---")
     for i, doc in enumerate(docs):
-        src = doc.metadata.get('source', 'Unknown').split("\\")[-1].split("/")[-1] #works for window, linux and mac
+        src = doc.metadata.get('source', 'Unknown').split("\\")[-1].split("/")[-1] 
         pg = doc.metadata.get('page', 'N/A')
-        print(f"Chunk {i+1}: {src} (Page {pg})")
+        relevance = doc.metadata.get('relevance_score', 'N/A')
+        
+        if isinstance(relevance, float):
+            print(f"Final {i+1}: {src} (Page {pg}) ")
+        else:
+            print(f"Final {i+1}: {src} (Page {pg}) ")
     print("-----------------------------------\n")
 
     context = ""
     for i, doc in enumerate(docs):
-        #extracting the metadata we built during the ingestion phase
+        #extracting the metadata
         source = doc.metadata.get('source', 'Unknown File').split("\\")[-1].split("/")[-1]
         page = doc.metadata.get('page', 'N/A')
         context += f"\n--- [Source: {source}, Page: {page}] ---\n{doc.page_content}\n"
         
-    print(f"Successfully retrieved {len(docs)} chunks. Handing off to Gemma 3...\n")
+    print(f"Successfully retrieved {len(docs)} highly optimized chunks. Handing off to {LLM_MODEL}...\n")
     print("-" * 70)
     
     #strict prompt forcing citations
@@ -126,7 +152,7 @@ def test_rag_pipeline():
     Question: {query}
     """
     
-    #stream the LLM response token-by-token
+    #stream the LLM response token by token
     for chunk in llm.stream([HumanMessage(content=prompt)]):
         print(chunk.content, end="", flush=True)
         
