@@ -284,20 +284,6 @@ def external_research_node(state: AgentState) -> dict:
 def finalize_research_node(state: AgentState) -> dict:
     """Extracts the final answer from the research loop."""
     print("--- [AGENT: RESEARCH COMPLETE. FINALIZING] ---")
-    for msg in state["research_messages"]:
-
-        #check if the tool ever returned our fatal flag
-        if getattr(msg, "content", None) :
-            print(">>PYTHON OVERRIDE: API Failure detected in history. Purging hallucinated response.")
-            safe_abort_msg = (
-                "I could not find this information in the local database. "
-                "I autonomously routed to the live Semantic Scholar API to find the answer, "
-                "but the server is currently rejecting connections due to a Rate Limit (Error 429). "
-                "To ensure absolute accuracy, I must admit defeat rather than extrapolate unverified data."
-            )
-            return {"generation": safe_abort_msg}
-
-    #no errors
     last_msg = state["research_messages"][-1]
     return {"generation": last_msg.content}
 
