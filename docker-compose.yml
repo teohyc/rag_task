@@ -3,7 +3,7 @@ version: '3.8'
 services:
   #LangGraph agent
   agent_backend:
-    build: ./backend
+    build: . 
     ports:
       - "8000:8000"
     environment:
