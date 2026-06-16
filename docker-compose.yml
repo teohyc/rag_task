@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  #LangGraph agent
+  agent_backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      #GPU server location for the agent to send requests to
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434 
+    volumes:
+      #mount the ChromaDB vector storage locally so data persists if the container restarts
+      - ./vectordb:/app/vectordb 
+
+  #frontend
+  web_frontend:
+    image: node:18-alpine
+    working_dir: /frontend
+    ports:
+      - "3000:3000"
+    environment:
+      # telling frontend the backend port
+      - NEXT_PUBLIC_API_URL=http://agent_backend:8000
