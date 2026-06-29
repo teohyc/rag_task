@@ -27,7 +27,7 @@ async def stream_generator(text: str):
         await asyncio.sleep(0.04) #simulate typing latency
 
 @app.post("/chat")
-async def chat_endpoint(request: ChatRequest):
+def chat_endpoint(request: ChatRequest):
     """
     Receives a question, runs the LangGraph Agentic RAG, 
     and streams the final response back to the client.
